@@ -3,18 +3,22 @@ from telegram import Update
 from yt import upload
 from telegram.ext import ContextTypes
 
+BASE = os.path.dirname(os.path.abspath(__file__))
 VOICE = "id-ID-ArdiNeural"
-ALLOWED = os.environ.get("ALLOWED_ID", "")
-PICS = os.path.expanduser("~/storage/shared/Pictures")
+PICS = os.path.realpath(os.path.expanduser("~/storage/shared/Pictures"))
 VF = ("scale=1080:1920:force_original_aspect_ratio=decrease,"
       "pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30")
 IMG = (".jpg", ".jpeg", ".png", ".webp")
 VID = (".mp4", ".mov", ".webm", ".mkv")
 VOL_KLIP = 0.3
+MAX_TG = 49 * 1024 * 1024  # batas upload bot Telegram 50 MB
 FONT = (glob.glob("/system/fonts/Roboto*.ttf")
         + glob.glob("/system/fonts/*.ttf") + [""])[0]
 ENC = ["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
        "-c:a", "aac", "-ar", "44100", "-ac", "2"]
+
+KUNCI = asyncio.Lock()  # satu proses /buat dalam satu waktu
+
 
 async def jalan(*cmd):
     p = await asyncio.create_subprocess_exec(
@@ -23,6 +27,7 @@ async def jalan(*cmd):
     if p.returncode != 0:
         raise RuntimeError(err.decode()[-300:])
     return out.decode()
+
 
 async def tts(teks, mp3):
     if os.path.exists(mp3) and os.path.getsize(mp3) > 0:
@@ -38,15 +43,18 @@ async def tts(teks, mp3):
                 raise
             await asyncio.sleep(5 + n * 5)
 
+
 async def durasi(path):
     out = await jalan("ffprobe", "-v", "error", "-show_entries",
                       "format=duration", "-of", "csv=p=0", path)
     return float(out.strip())
 
+
 async def ada_audio(path):
     out = await jalan("ffprobe", "-v", "error", "-select_streams", "a",
                       "-show_entries", "stream=codec_type", "-of", "csv=p=0", path)
     return bool(out.strip())
+
 
 def sub(pdir, i, teks, dn):
     kata = teks.split()
@@ -66,19 +74,46 @@ def sub(pdir, i, teks, dn):
         t0 = t1
     return out
 
+
+def folder_aman(nama):
+    """Hanya izinkan folder di dalam PICS (blok path absolut dan ../)."""
+    fg = os.path.realpath(os.path.join(PICS, nama))
+    if fg == PICS or fg.startswith(PICS + os.sep):
+        return fg
+    return None
+
+
 async def buat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if ALLOWED and str(update.effective_user.id) != ALLOWED:
+    a = os.environ.get("ALLOWED_ID", "").strip()
+    if not a:
+        await update.message.reply_text(
+            "ALLOWED_ID di .env belum diisi, bot menolak perintah ini. "
+            "Kirim /id, isi ALLOWED_ID, lalu restart bot.")
+        return
+    if str(update.effective_user.id) != a:
         return
     if not context.args:
         await update.message.reply_text(
             "Format: /buat <nama folder>\n"
             "Contoh: /buat tes-video\n(folder dicari di Pictures)")
         return
-    nama = " ".join(context.args)
-    fg = nama if nama.startswith("/") else os.path.join(PICS, nama)
+    if KUNCI.locked():
+        await update.message.reply_text(
+            "Masih ada proses /buat yang berjalan, tunggu selesai dulu.")
+        return
+    async with KUNCI:
+        await proses(update, " ".join(context.args))
+
+
+async def proses(update, nama):
+    fg = folder_aman(nama)
+    if fg is None:
+        await update.message.reply_text(
+            "Folder harus berada di dalam Pictures: " + PICS)
+        return
     media = sorted((f for f in glob.glob(fg + "/*")
                     if f.lower().endswith(IMG + VID)), key=os.path.getmtime)
-    daftar = sorted(glob.glob(os.path.expanduser("~/ytbot/proyek/*/scenes.json")))
+    daftar = sorted(glob.glob(os.path.join(BASE, "proyek", "*", "scenes.json")))
     if not media:
         await update.message.reply_text("Tidak ada gambar/video di folder: " + fg)
         return
@@ -87,9 +122,15 @@ async def buat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     sj = daftar[-1]
     pdir = os.path.dirname(sj)
-    with open(sj) as f:
-        meta = json.load(f)
-    scenes = meta["scenes"]
+    try:
+        with open(sj) as f:
+            meta = json.load(f)
+        scenes = meta["scenes"]
+        if not scenes:
+            raise ValueError("scenes kosong")
+    except Exception as e:
+        await update.message.reply_text("Naskah rusak (%s): %s" % (sj, str(e)[:200]))
+        return
     pesan = "%d scene, %d file (gambar/video)." % (len(scenes), len(media))
     if len(media) != len(scenes):
         pesan += " Jumlahnya beda, file diulang/dipotong sesuai urutan waktu unduh."
@@ -104,7 +145,6 @@ async def buat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             dn = await durasi(mp3) + 0.25
             st = sub(pdir, i, s["narasi"], dn)
             if f.lower().endswith(VID):
-                panjang = dn
                 fc = ("[0:v]" + VF + ",tpad=stop_mode=clone:stop_duration=30"
                       + st + "[v]")
                 if await ada_audio(f):
@@ -114,7 +154,7 @@ async def buat(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     fc += ";[1:a]apad[a]"
                 cmd = (["ffmpeg", "-y", "-i", f, "-i", mp3,
                         "-filter_complex", fc, "-map", "[v]", "-map", "[a]",
-                        "-t", "%.2f" % panjang] + ENC + [klip])
+                        "-t", "%.2f" % dn] + ENC + [klip])
             else:
                 cmd = (["ffmpeg", "-y", "-loop", "1", "-i", f, "-i", mp3,
                         "-vf", VF + st, "-af", "apad",
@@ -133,10 +173,22 @@ async def buat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text("Gagal: %s" % str(e)[:300])
         return
-    await update.message.reply_text("Video jadi, mengirim...")
-    with open(hasil, "rb") as v:
-        await update.message.reply_video(
-            v, read_timeout=300, write_timeout=300, connect_timeout=60)
+
+    ukuran = os.path.getsize(hasil)
+    if ukuran > MAX_TG:
+        await update.message.reply_text(
+            "Video jadi (%.0f MB), terlalu besar untuk dikirim lewat Telegram. "
+            "File: %s" % (ukuran / 1048576, hasil))
+    else:
+        await update.message.reply_text("Video jadi, mengirim...")
+        try:
+            with open(hasil, "rb") as v:
+                await update.message.reply_video(
+                    v, read_timeout=300, write_timeout=300, connect_timeout=60)
+        except Exception as e:
+            await update.message.reply_text(
+                "Kirim video ke Telegram gagal: %s" % str(e)[:200])
+
     await update.message.reply_text("Mengupload ke YouTube (private)...")
     try:
         link = await asyncio.to_thread(
