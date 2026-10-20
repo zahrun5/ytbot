@@ -25,7 +25,11 @@ KEY = os.environ["ROUTER_KEY"]
 MODEL = os.environ.get("ROUTER_MODEL", "kr/claude-sonnet-4.5")
 PER_MENIT = 10
 COBA = 3
-GAYA = "simple flat vector illustration, same white stickman character with round head and thick black outline, minimal pastel background, clean icons, vertical 9:16"
+MAKS_KATA = 19  # lebih dari ini narasi bisa melebihi klip 8 detik
+STICKMAN = ("a small white stickman with a round head, thick black outline "
+            "and simple stick limbs")
+AKHIR = ("No text, no letters, no subtitles, no speech. "
+         "Vertical 9:16, 8 seconds.")
 
 
 def allowed_id():
@@ -72,22 +76,40 @@ def cek_scenes(data):
         raise ValueError("daftar scenes kosong atau tidak ada")
     for i, s in enumerate(sc, 1):
         if (not isinstance(s, dict) or not str(s.get("narasi", "")).strip()
-                or not str(s.get("prompt_gambar", "")).strip()):
+                or not str(s.get("prompt_video", "")).strip()):
             raise ValueError("scene %d tidak lengkap" % i)
     return sc
+
+
+def scene_panjang(sc):
+    """Nomor scene yang narasinya melebihi MAKS_KATA."""
+    return [i for i, s in enumerate(sc, 1)
+            if len(str(s["narasi"]).split()) > MAKS_KATA]
 
 
 async def minta_naskah(menit, tema):
     n = menit * PER_MENIT
     sistem = (
-        "Kamu penulis naskah video tutorial singkat berbahasa Indonesia, satu langkah jelas per scene. "
-        f"Buat tepat {n} scene. Narasi antar scene harus mengalir menyambung seperti orang bercerita, pakai kata penghubung, bukan poin terpisah. Tiap scene punya 'narasi' (15-18 kata, "
-        "bahasa Indonesia, enak dibaca keras) dan 'prompt_gambar' "
-        "(bahasa Inggris, 1-2 kalimat, deskriptif). "
-        f"Semua prompt_gambar harus diakhiri dengan gaya tetap ini: {GAYA}. "
-        "Tokoh utama selalu stickman yang sama di semua scene. "
+        "Kamu penulis naskah video pendek berbahasa Indonesia yang tiap scene-nya "
+        "dibuat jadi satu klip AI berdurasi 8 detik. "
+        f"Buat tepat {n} scene, satu langkah atau gagasan jelas per scene. "
+        "Narasi antar scene harus mengalir menyambung seperti orang bercerita, "
+        "pakai kata penghubung, bukan poin terpisah. "
+        "Tiap scene punya 'narasi' (14-17 kata, bahasa Indonesia, enak dibaca keras, "
+        "jangan lebih dari 17 kata) dan 'prompt_video' (bahasa Inggris, 2-3 kalimat). "
+        "prompt_video mendeskripsikan adegan sinematik yang REALISTIS sesuai topik: "
+        "benda, tempat, dan orang lain tampil realistis dan BUKAN stickman. "
+        "Sebut juga aksi stickman di scene itu dan gerak kameranya. "
+        "Untuk topik tutorial atau tips, stickman adalah pelaku langkahnya. "
+        "Untuk topik sejarah, tokoh, atau peradaban, stickman adalah pemandu yang "
+        "berdiri atau berjalan di dalam masa itu sebagai pengamat, sedangkan tokoh "
+        "dan dunianya realistis. "
+        f"Stickman selalu karakter yang sama di semua scene, dan setiap prompt_video "
+        f"harus menyebutnya dengan deskripsi persis ini: {STICKMAN}. "
+        "Jangan minta teks, tulisan, label, angka, atau subtitle muncul di gambar. "
+        f"Setiap prompt_video harus diakhiri kalimat ini: {AKHIR} "
         'Balas HANYA JSON: {"judul":"","deskripsi":"","tag":[],'
-        '"scenes":[{"narasi":"","prompt_gambar":""}]}'
+        '"scenes":[{"narasi":"","prompt_video":""}]}'
     )
     body = {"model": MODEL, "stream": False, "messages": [
         {"role": "system", "content": sistem},
@@ -101,9 +123,9 @@ async def minta_naskah(menit, tema):
             r.raise_for_status()
             data = ambil_json(baca(r.text))
             sc = cek_scenes(data)
-            if len(sc) == n:
+            if len(sc) == n and not scene_panjang(sc):
                 return data
-            terbaik = data  # valid tapi jumlah scene beda, simpan sebagai cadangan
+            terbaik = data  # valid tapi belum pas, simpan sebagai cadangan
         except Exception as e:
             galat = e
         if percobaan < COBA - 1:
@@ -146,8 +168,13 @@ async def naskah(update: Update, context: ContextTypes.DEFAULT_TYPE):
     scenes = data["scenes"]
     catatan = ""
     if len(scenes) != menit * PER_MENIT:
-        catatan = "\n\nCatatan: model membuat %d scene (target %d)." % (
+        catatan += "\n\nCatatan: model membuat %d scene (target %d)." % (
             len(scenes), menit * PER_MENIT)
+    panjang = scene_panjang(scenes)
+    if panjang:
+        catatan += ("\n\nCatatan: narasi scene %s lebih dari %d kata, "
+                    "bisa melebihi klip 8 detik." % (
+                        ", ".join(map(str, panjang)), MAKS_KATA))
     await update.message.reply_text(
         "JUDUL: %s\n\n%s%s\n\nTersimpan di: %s" % (
             data.get("judul", ""), data.get("deskripsi", ""), catatan, folder))
@@ -155,7 +182,7 @@ async def naskah(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "<b>Scene %d</b> - %s\n\n<code>%s</code>" % (
                 i, html.escape(s.get("narasi", "")),
-                html.escape(s.get("prompt_gambar", ""))),
+                html.escape(s.get("prompt_video", ""))),
             parse_mode="HTML")
         await asyncio.sleep(1.1)
 
