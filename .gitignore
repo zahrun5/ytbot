@@ -1,0 +1,6 @@
+.env
+token.json
+client_secret.json
+proyek/
+__pycache__/
+*.bak*
