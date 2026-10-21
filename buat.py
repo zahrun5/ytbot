@@ -93,9 +93,20 @@ async def buat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != a:
         return
     if not context.args:
-        await update.message.reply_text(
-            "Format: /buat <nama folder>\n"
-            "Contoh: /buat tes-video\n(folder dicari di Pictures)")
+        daftar = sorted(glob.glob(os.path.join(BASE, "proyek", "*", "scenes.json")))
+        if daftar:
+            pdir = os.path.dirname(daftar[-1])
+            mdir_file = pdir + "/media_dir.txt"
+            hint = ""
+            if os.path.exists(mdir_file):
+                hint = "\nFolder media: " + open(mdir_file).read().strip()
+            await update.message.reply_text(
+                "Format: /buat <timestamp>\n"
+                "Contoh: /buat " + os.path.basename(pdir) +
+                "\n\nNaskah terbaru: " + os.path.basename(pdir) + hint)
+        else:
+            await update.message.reply_text(
+                "Format: /buat <timestamp>\nBelum ada naskah. Jalankan /naskah dulu.")
         return
     if KUNCI.locked():
         await update.message.reply_text(
@@ -106,22 +117,46 @@ async def buat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def proses(update, nama):
-    fg = folder_aman(nama)
-    if fg is None:
-        await update.message.reply_text(
-            "Folder harus berada di dalam Pictures: " + PICS)
+    # Cek apakah argumen adalah timestamp folder proyek
+    pdir_cek = os.path.join(BASE, "proyek", nama)
+    sj_cek = pdir_cek + "/scenes.json"
+    mdir_file = pdir_cek + "/media_dir.txt"
+
+    if os.path.isdir(pdir_cek) and os.path.exists(sj_cek):
+        # Mode timestamp: pakai media_dir.txt kalau ada, fallback ke Pictures/nama
+        pdir = pdir_cek
+        sj = sj_cek
+        if os.path.exists(mdir_file):
+            fg = open(mdir_file).read().strip()
+        else:
+            fg = folder_aman(nama)
+            if fg is None:
+                await update.message.reply_text(
+                    "media_dir.txt tidak ditemukan dan nama folder tidak valid di Pictures.")
+                return
+    else:
+        # Mode lama: cari folder di Pictures, pakai naskah terbaru
+        fg = folder_aman(nama)
+        if fg is None:
+            await update.message.reply_text(
+                "Folder proyek '" + nama + "' tidak ditemukan di proyek/ "
+                "dan bukan folder valid di Pictures: " + PICS)
+            return
+        daftar = sorted(glob.glob(os.path.join(BASE, "proyek", "*", "scenes.json")))
+        if not daftar:
+            await update.message.reply_text("Belum ada naskah. Jalankan /naskah dulu.")
+            return
+        sj = daftar[-1]
+        pdir = os.path.dirname(sj)
+
+    if not os.path.isdir(fg):
+        await update.message.reply_text("Folder media tidak ditemukan: " + fg)
         return
     media = sorted((f for f in glob.glob(fg + "/*")
                     if f.lower().endswith(IMG + VID)), key=os.path.getmtime)
-    daftar = sorted(glob.glob(os.path.join(BASE, "proyek", "*", "scenes.json")))
     if not media:
         await update.message.reply_text("Tidak ada gambar/video di folder: " + fg)
         return
-    if not daftar:
-        await update.message.reply_text("Belum ada naskah. Jalankan /naskah dulu.")
-        return
-    sj = daftar[-1]
-    pdir = os.path.dirname(sj)
     try:
         with open(sj) as f:
             meta = json.load(f)

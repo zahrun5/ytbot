@@ -24,6 +24,7 @@ URL = "https://llm.albiontools.fun/v1/chat/completions"
 KEY = os.environ["ROUTER_KEY"]
 MODEL = os.environ.get("ROUTER_MODEL", "kr/claude-sonnet-4.5")
 PER_MENIT = 10
+DL = os.path.realpath(os.path.expanduser("~/storage/shared/Download"))
 COBA = 3
 MAKS_KATA = 19  # lebih dari ini narasi bisa melebihi klip 8 detik
 STICKMAN = ("a small white stickman with a round head, thick black outline "
@@ -166,6 +167,10 @@ async def naskah(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(folder + "/scenes.json", "w") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     scenes = data["scenes"]
+    media_dir = os.path.join(DL, "ytbot-" + os.path.basename(folder))
+    os.makedirs(media_dir, exist_ok=True)
+    with open(folder + "/media_dir.txt", "w") as f:
+        f.write(media_dir)
     catatan = ""
     if len(scenes) != menit * PER_MENIT:
         catatan += "\n\nCatatan: model membuat %d scene (target %d)." % (
@@ -177,7 +182,8 @@ async def naskah(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         ", ".join(map(str, panjang)), MAKS_KATA))
     await update.message.reply_text(
         "JUDUL: %s\n\n%s%s\n\nTersimpan di: %s" % (
-            data.get("judul", ""), data.get("deskripsi", ""), catatan, folder))
+            data.get("judul", ""), data.get("deskripsi", ""), catatan,
+            folder + "\n\nFolder bahan (taruh video di sini):\n" + media_dir))
     for i, s in enumerate(scenes, 1):
         await update.message.reply_text(
             "<b>Scene %d</b> - %s\n\n<code>%s</code>" % (

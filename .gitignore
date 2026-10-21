@@ -4,3 +4,4 @@ client_secret.json
 proyek/
 __pycache__/
 *.bak*
+patch_bot.py
