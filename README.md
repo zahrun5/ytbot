@@ -110,19 +110,26 @@ If you want to upload to Facebook, follow these steps:
    - `public_profile`
 5. Copy the token
 
-### 3. Get Page Access Token
+### 3. Get Page Access Token (Never Expiring)
 
+Facebook user tokens expire in 1-2 hours, but page tokens derived from a **long-lived user token** will **NEVER expire** unless you change your password or revoke app access!
+
+Fill in your initial credentials in `.env`:
 ```bash
-# Set user token in .env first
-FACEBOOK_USER_ACCESS_TOKEN=<paste-token-here>
+FACEBOOK_PAGE_ID=<your-page-id>
+FACEBOOK_USER_ACCESS_TOKEN=<paste-user-token-here>
 FACEBOOK_APP_ID=<your-app-id>
 FACEBOOK_APP_SECRET=<your-app-secret>
+```
 
-# Run Python to convert to page token
+Then check and generate your page token:
+```bash
 python -c "import fb_auth; print(fb_auth.status())"
 ```
 
-The bot will automatically refresh the token when needed.
+To verify if your token is permanent, check it on [Facebook Access Token Debugger](https://developers.facebook.com/tools/debug/accesstoken/). Look at **Expires**: if it says **"Never"**, you are all set forever!
+
+Even if the token ever becomes invalid, `fb_auth.py` automatically exchanges the user token, retrieves a fresh page token from `/me/accounts`, and saves it back to `.env` without interrupting bot operation.
 
 ---
 
