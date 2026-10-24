@@ -1,12 +1,11 @@
 # ytbot
 
-A Telegram bot that runs on Android (Termux) to automate AI short-video creation and YouTube uploads.
+A Telegram bot that runs on Android (Termux) to automate AI short-video creation and uploads to YouTube & Facebook.
 
 **Workflow:**
-1. Send `/naskah` to generate an AI script (narration + video prompts per scene)
-2. Generate AI video clips from the prompts using a tool like Google Flow
-3. Place the clips in the media folder the bot created
-4. Send `/buat` to assemble the final video with TTS narration, subtitles, and upload to YouTube
+1. Use bot menu to generate an AI script (narration + video prompts per scene)
+2. Auto-generate AI images via `ag/gemini-3.1-flash-image` OR manually download videos
+3. Assemble the final video with TTS narration, subtitles, and upload to YouTube/Facebook
 
 ---
 
@@ -54,7 +53,18 @@ Edit `.env`:
 BOT_TOKEN=        # Telegram bot token from @BotFather
 ROUTER_KEY=       # Your LLM API key
 ROUTER_MODEL=     # Model ID (default: kr/claude-sonnet-4.5)
+LLM_BASE_URL=     # API base URL (default: https://llm.albiontools.fun/v1)
 ALLOWED_ID=       # Your Telegram user ID (see below)
+
+# Upload target: youtube, facebook, or both
+UPLOAD_TARGET=youtube
+
+# Facebook (optional - only if you want to upload to Facebook)
+FACEBOOK_PAGE_ID=
+FACEBOOK_PAGE_ACCESS_TOKEN=
+FACEBOOK_USER_ACCESS_TOKEN=
+FACEBOOK_APP_ID=
+FACEBOOK_APP_SECRET=
 ```
 
 To find your Telegram user ID, start the bot first (without `ALLOWED_ID` set), then send `/id` to the bot.
@@ -76,6 +86,46 @@ This opens a local OAuth flow and saves `token.json`. The token refreshes automa
 
 ---
 
+## Facebook Setup (Optional)
+
+If you want to upload to Facebook, follow these steps:
+
+### 1. Create Facebook App
+
+1. Go to [Meta for Developers](https://developers.facebook.com)
+2. Create a new app
+3. Add "Pages" permission
+4. Note your **App ID** and **App Secret** from Settings → Basic
+
+### 2. Get User Access Token
+
+1. Go to [Graph API Explorer](https://developers.facebook.com/tools/explorer)
+2. Select your app
+3. Click **Get Access Token** → **Get User Access Token**
+4. Select permissions:
+   - `pages_show_list`
+   - `pages_read_engagement`
+   - `pages_manage_posts`
+   - `pages_manage_video`
+   - `public_profile`
+5. Copy the token
+
+### 3. Get Page Access Token
+
+```bash
+# Set user token in .env first
+FACEBOOK_USER_ACCESS_TOKEN=<paste-token-here>
+FACEBOOK_APP_ID=<your-app-id>
+FACEBOOK_APP_SECRET=<your-app-secret>
+
+# Run Python to convert to page token
+python -c "import fb_auth; print(fb_auth.status())"
+```
+
+The bot will automatically refresh the token when needed.
+
+---
+
 ## Running the Bot
 
 ```bash
@@ -92,12 +142,22 @@ nohup python bot.py &
 
 ## Bot Commands
 
+The bot now uses **interactive buttons** instead of text commands!
+
 | Command | Description |
 |---------|-------------|
-| `/start` | Show available commands |
+| `/start` | Show main menu with buttons |
 | `/id` | Show your Telegram user ID |
-| `/naskah <minutes 1-3> <topic>` | Generate an AI video script |
-| `/buat <project-timestamp>` | Assemble video from media files and upload to YouTube |
+
+### Main Menu Buttons
+
+| Button | Function |
+|--------|----------|
+| 📝 **Buat Naskah** | Generate AI video script (interactive - bot will ask for duration and topic) |
+| 🖼️ **Generate Images (AI)** | Auto-generate images for all scenes using `ag/gemini-3.1-flash-image` |
+| 🎬 **Buat Video** | Assemble video from media files and upload |
+| 📤 **Upload Settings** | Choose upload target: YouTube only, Facebook only, or Both |
+| 📊 **Status** | View bot status and credentials |
 
 ---
 
@@ -105,9 +165,10 @@ nohup python bot.py &
 
 ### Step 1 — Generate a script
 
-```
-/naskah 2 the fall of the Roman Empire
-```
+1. Send `/start` to the bot
+2. Click **📝 Buat Naskah**
+3. Bot will ask: "Berapa menit durasi video?" → Reply with `2`
+4. Bot will ask: "Kirim tema/topik video" → Reply with `the fall of the Roman Empire`
 
 The bot will:
 - Call the LLM to create a script with 20 scenes (10 scenes/minute)
@@ -115,7 +176,15 @@ The bot will:
 - Create a media staging folder in `Downloads/ytbot-<timestamp>`
 - Send each scene's narration and video prompt to the chat
 
-### Step 2 — Generate video clips
+### Step 2 — Generate images (AI) OR manual download
+
+**Option A: Auto-generate with AI (Recommended)**
+
+1. Click **🖼️ Generate Images (AI)**
+2. Bot will generate images for all scenes automatically using `ag/gemini-3.1-flash-image`
+3. Images saved to the media folder
+
+**Option B: Manual download (for video clips)**
 
 Use the video prompts from each scene with an AI video generator (e.g. Google Flow, Kling, Runway).
 
@@ -129,9 +198,8 @@ File order is determined by modification time, so download them in scene order.
 
 ### Step 3 — Assemble and upload
 
-```
-/buat 20261021-004229
-```
+1. Click **🎬 Buat Video**
+2. Confirm the project
 
 The bot will:
 - Generate TTS narration per scene (Indonesian voice: `id-ID-ArdiNeural`)
@@ -139,7 +207,14 @@ The bot will:
 - Encode all clips to 1080x1920 (9:16) H.264/AAC
 - Concatenate into a single `video.mp4`
 - Send the video via Telegram (if under 50 MB)
-- Upload to YouTube as **private**
+- Upload to YouTube and/or Facebook based on your **Upload Settings**
+
+### Upload Settings
+
+Click **📤 Upload Settings** to choose:
+- **YouTube only** - Upload to YouTube as private
+- **Facebook only** - Upload to your Facebook Page
+- **Both** - Upload to both platforms simultaneously
 
 ---
 
@@ -147,9 +222,11 @@ The bot will:
 
 ```
 ytbot/
-├── bot.py              # Telegram bot entry point
+├── bot.py              # Telegram bot entry point (button-based UI)
 ├── buat.py             # Video assembly and encoding
 ├── yt.py               # YouTube upload via Data API v3
+├── fb_auth.py          # Facebook authentication helper
+├── ai_image.py         # AI image generation via ag/gemini-3.1-flash-image
 ├── login.py            # One-time Google OAuth2 login
 ├── requirements.txt    # Python dependencies
 ├── .env.example        # Environment variable template
@@ -168,7 +245,38 @@ ytbot/
 
 ## Notes
 
-- Only one `/buat` process can run at a time. The bot will reject concurrent requests.
+- Only one video assembly process can run at a time. The bot will reject concurrent requests.
 - If the number of media files does not match the number of scenes, files are cycled or truncated by order.
-- Videos over 50 MB are not sent via Telegram but are still uploaded to YouTube. The file path is shown in chat.
-- The LLM API endpoint is configured at `llm.albiontools.fun`. To use a different provider, change the `URL` constant in `bot.py`.
+- Videos over 50 MB are not sent via Telegram but are still uploaded to YouTube/Facebook. The file path is shown in chat.
+- The LLM API endpoint is configured at `llm.albiontools.fun`. To use a different provider, change `LLM_BASE_URL` in `.env`.
+- AI image generation uses `ag/gemini-3.1-flash-image` model via 9router.
+- Facebook tokens are automatically refreshed when expired (requires `FACEBOOK_APP_ID` and `FACEBOOK_APP_SECRET`).
+
+---
+
+## New Features (v2.0)
+
+✅ **Button-based UI** - No more typing commands, just click buttons!  
+✅ **AI Image Generation** - Auto-generate images using `ag/gemini-3.1-flash-image`  
+✅ **Facebook Upload** - Upload to Facebook Page in addition to YouTube  
+✅ **Upload Settings** - Choose YouTube only, Facebook only, or both  
+✅ **Interactive Flow** - Bot asks questions step-by-step for better UX  
+
+---
+
+## Migration from v1.x
+
+Old commands still work for backwards compatibility:
+- `/naskah 2 topic` → Still works, but use button menu for better experience
+- `/buat timestamp` → Still works
+
+New `.env` variables (add to your existing `.env`):
+```
+LLM_BASE_URL=https://llm.albiontools.fun/v1
+UPLOAD_TARGET=youtube
+FACEBOOK_PAGE_ID=
+FACEBOOK_PAGE_ACCESS_TOKEN=
+FACEBOOK_USER_ACCESS_TOKEN=
+FACEBOOK_APP_ID=
+FACEBOOK_APP_SECRET=
+```
